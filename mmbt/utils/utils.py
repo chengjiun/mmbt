@@ -14,6 +14,22 @@ import shutil
 import os
 
 import torch
+import subprocess
+
+def get_gpu_memory_map():
+    """Get the current gpu usage.
+    Return list of memory use 
+    -------
+    usage: dict
+        Keys are device ids as integers.
+        Values are memory usage as integers in MB.
+    """
+    result = (str(subprocess.check_output(['nvidia-smi', '--query-gpu=memory.used','--format=csv,nounits,noheader']))
+                        .strip("\\n\'")
+                        .replace("b\'",'')
+                        .split("\\n"))
+
+    return [int(x) for x in result]
 
 
 def set_seed(seed):
