@@ -261,7 +261,7 @@ def train(args):
             is_improvement,
             args.savedir,
         )
-
+        torch.cuda.empty_cache()
         if n_no_improve >= args.patience:
             logger.info("No improvement. Breaking out of loop.")
             break
