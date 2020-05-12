@@ -1,2 +1,7 @@
 .idea/
-fb/
+fb
+input/
+save/
+*/*/__pycache__/
+*/__pycache__/
+notebooks/

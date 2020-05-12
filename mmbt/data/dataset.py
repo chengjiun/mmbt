@@ -106,7 +106,7 @@ class TsvVSNLIDataset(JsonlDataset):
         df = pd.read_csv(data_path, sep='\t')[['gold_label', 'sentence1', 'sentence2', 'image']]
         print(f'{data_path}, number of rows: {len(df)}')
         if df['sentence2'].isnull().sum() > 0:
-            print(f' drop number of lines because of missing sentence2: {df['sentence2'].isnull().sum()}')
+            print(f" drop number of lines because of missing sentence2: {df['sentence2'].isnull().sum()}")
         df = df.loc[df['sentence2'].isnull() != True]
         df = df.rename({'gold_label':'label', 'image':'img'}, axis=1)
         df['img'] = 'flickr30/flickr30k-images/' + df['img']

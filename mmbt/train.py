@@ -215,8 +215,9 @@ def train(args):
         model.train()
         optimizer.zero_grad()
         logger.info(f"total data:{len(train_loader)}")
+        train_batch_start = time.time()
         for batch in tqdm(train_loader, total=(len(train_loader))):
-            train_batch_start = time.time()
+
 
             loss, _, _ = model_forward(i_epoch, model, args, criterion, batch)
             if args.multiGPU:
@@ -229,11 +230,8 @@ def train(args):
             if global_step % args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-
-            train_batch_end = time.time()
-
-
-        logger.info(f"EPOCH: {i_epoch}, Train Loss: {np.mean(train_losses):.4f}, time: {train_batch_end - train_batch_start} secs")
+        train_batch_end = time.time()
+        logger.info(f"EPOCH: {i_epoch}, Train Loss: {np.mean(train_losses):.4f}, time: {(train_batch_end - train_batch_start)/60:.1f}mins")
         eval_start = time.time()
         model.eval()
         metrics = model_eval(i_epoch, val_loader, model, args, criterion)
@@ -242,7 +240,7 @@ def train(args):
         tuning_metric = (
             metrics["micro_f1"] if args.task_type == "multilabel" else metrics["acc"]
         )
-        logger.info(f"Val acc {tuning_metrics}, time: {eval_end - eval_start} secs")
+        logger.info(f"Val acc {tuning_metric}, time: {(eval_end - eval_start)/60:.2f}mins")
         scheduler.step(tuning_metric)
         is_improvement = tuning_metric > best_metric
         if is_improvement:
