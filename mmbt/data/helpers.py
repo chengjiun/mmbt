@@ -17,9 +17,9 @@ import torchvision.transforms as transforms
 from pytorch_pretrained_bert import BertTokenizer
 from torch.utils.data import DataLoader
 
-from mmbt.data.dataset import JsonlDataset
+from mmbt.data.dataset import JsonlDataset, TsvVSNLIDataset
 from mmbt.data.vocab import Vocab
-
+import pandas as pd
 
 def get_transforms(args):
     return transforms.Compose(
@@ -37,7 +37,13 @@ def get_transforms(args):
 
 def get_labels_and_frequencies(path):
     label_freqs = Counter()
-    data_labels = [json.loads(line)["label"] for line in open(path)]
+    if path.endswith('.tsv'):
+        # only deal with single label (for vsnli)
+        df = pd.read_csv(path, sep='\t')[['gold_label']]
+        df = df.rename({'gold_label':'label'}, axis=1)
+        data_labels = df.values.tolist()
+    else:
+        data_labels = [json.loads(line)["label"] for line in open(path)]
     if type(data_labels[0]) == list:
         for label_row in data_labels:
             label_freqs.update(label_row)
@@ -109,16 +115,23 @@ def get_data_loaders(args):
 
     transforms = get_transforms(args)
 
+    if args.use_tsv:
+        table_loader = TsvVSNLIDataset
+        post_exp = '.tsv'
+    else:
+        table_loader = JsonlDataset
+        post_exp = '.jsonl'
+
     args.labels, args.label_freqs = get_labels_and_frequencies(
-        os.path.join(args.data_path, args.task, "train.jsonl")
+        os.path.join(args.data_path, args.task, "train"+post_exp)
     )
     vocab = get_vocab(args)
     args.vocab = vocab
     args.vocab_sz = vocab.vocab_sz
     args.n_classes = len(args.labels)
 
-    train = JsonlDataset(
-        os.path.join(args.data_path, args.task, "train.jsonl"),
+    train = table_loader(
+        os.path.join(args.data_path, args.task, "train"+post_exp),
         tokenizer,
         transforms,
         vocab,
@@ -127,8 +140,8 @@ def get_data_loaders(args):
 
     args.train_data_len = len(train)
 
-    dev = JsonlDataset(
-        os.path.join(args.data_path, args.task, "dev.jsonl"),
+    dev = table_loader(
+        os.path.join(args.data_path, args.task, "dev"+post_exp),
         tokenizer,
         transforms,
         vocab,
@@ -153,8 +166,8 @@ def get_data_loaders(args):
         collate_fn=collate,
     )
 
-    test_set = JsonlDataset(
-        os.path.join(args.data_path, args.task, "test.jsonl"),
+    test_set = table_loader(
+        os.path.join(args.data_path, args.task, "test"+post_exp),
         tokenizer,
         transforms,
         vocab,
@@ -170,8 +183,8 @@ def get_data_loaders(args):
     )
 
     if args.task == "vsnli":
-        test_hard = JsonlDataset(
-            os.path.join(args.data_path, args.task, "test_hard.jsonl"),
+        test_hard = table_loader(
+            os.path.join(args.data_path, args.task, "test_hard"+post_exp),
             tokenizer,
             transforms,
             vocab,
@@ -189,8 +202,8 @@ def get_data_loaders(args):
         test = {"test": test_loader, "test_hard": test_hard_loader}
 
     else:
-        test_gt = JsonlDataset(
-            os.path.join(args.data_path, args.task, "test_hard_gt.jsonl"),
+        test_gt = table_loader(
+            os.path.join(args.data_path, args.task, "test_hard_gt"+post_exp),
             tokenizer,
             transforms,
             vocab,

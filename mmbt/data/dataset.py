@@ -14,7 +14,7 @@ from PIL import Image
 
 import torch
 from torch.utils.data import Dataset
-
+import pandas as pd
 from mmbt.utils.utils import truncate_seq_pair, numpy_seed
 
 
@@ -80,9 +80,13 @@ class JsonlDataset(Dataset):
         image = None
         if self.args.model in ["img", "concatbow", "concatbert", "mmbt"]:
             if self.data[index]["img"]:
-                image = Image.open(
-                    os.path.join(self.data_dir, self.data[index]["img"])
-                ).convert("RGB")
+                try: 
+                    image = Image.open(
+                        os.path.join(self.data_dir, self.data[index]["img"])
+                    ).convert("RGB")
+                except:
+                    print(self.data_dir, self.data[index]["img"])
+                    raise
             else:
                 image = Image.fromarray(128 * np.ones((256, 256, 3), dtype=np.uint8))
             image = self.transforms(image)
@@ -95,3 +99,32 @@ class JsonlDataset(Dataset):
             segment += 1
 
         return sentence, segment, image, label
+
+
+class TsvVSNLIDataset(JsonlDataset):
+    def __init__(self, data_path, tokenizer, transforms, vocab, args):
+        df = pd.read_csv(data_path, sep='\t')[['gold_label', 'sentence1', 'sentence2', 'image']]
+        print(f'{data_path}, number of rows: {len(df)}')
+        if df['sentence2'].isnull().sum() > 0:
+            print(f' drop number of lines because of missing sentence2: {df['sentence2'].isnull().sum()}')
+        df = df.loc[df['sentence2'].isnull() != True]
+        df = df.rename({'gold_label':'label', 'image':'img'}, axis=1)
+        df['img'] = 'flickr30/flickr30k-images/' + df['img']
+        self.data = df.to_dict('records')
+        self.data_dir = str(os.path.dirname(data_path))
+        self.tokenizer = tokenizer
+        self.args = args
+        self.vocab = vocab
+        self.n_classes = len(args.labels)
+        self.text_start_token = ["[CLS]"] if args.model != "mmbt" else ["[SEP]"]
+
+        with numpy_seed(0):
+            for row in self.data:
+                if np.random.random() < args.drop_img_percent:
+                    row["img"] = None
+
+        self.max_seq_len = args.max_seq_len
+        if args.model == "mmbt":
+            self.max_seq_len -= args.num_image_embeds
+
+        self.transforms = transforms

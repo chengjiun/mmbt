@@ -16,7 +16,14 @@ class ImageEncoder(nn.Module):
     def __init__(self, args):
         super(ImageEncoder, self).__init__()
         self.args = args
-        model = torchvision.models.resnet152(pretrained=True)
+        if args.img_model == 'resnet152':
+            model = torchvision.models.resnet152(pretrained=True)
+        elif args.img_model == 'resnet50':
+            model = torchvision.models.resnet50(pretrained=True)
+        elif args.img_model == 'resnet18':
+            model = torchvision.models.resnet18(pretrained=True)
+        else:
+            raise('image model not defined in args.img_model')
         modules = list(model.children())[:-2]
         self.model = nn.Sequential(*modules)
 

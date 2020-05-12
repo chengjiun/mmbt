@@ -21,12 +21,15 @@ from mmbt.data.helpers import get_data_loaders
 from mmbt.models import get_model
 from mmbt.utils.logger import create_logger
 from mmbt.utils.utils import *
-
+import time
 
 def get_args(parser):
     parser.add_argument("--batch_sz", type=int, default=128)
     parser.add_argument("--bert_model", type=str, default="bert-base-uncased", choices=["bert-base-uncased", "bert-large-uncased"])
+    # only resnet152 works (fc layers dimension issue)
+    parser.add_argument("--img_model", type=str, default='resnet152', choices=['resnet152', 'resnet50', 'resnet18'])
     parser.add_argument("--data_path", type=str, default="/path/to/data_dir/")
+    parser.add_argument("--use_tsv", type=int, default=0)
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--embed_sz", type=int, default=300)
@@ -55,6 +58,7 @@ def get_args(parser):
     parser.add_argument("--task_type", type=str, default="multilabel", choices=["multilabel", "classification"])
     parser.add_argument("--warmup", type=float, default=0.1)
     parser.add_argument("--weight_classes", type=int, default=1)
+    parser.add_argument("--multiGPU", type=int, default=0)
 
 
 def get_criterion(args):
@@ -190,7 +194,8 @@ def train(args):
     logger = create_logger("%s/logfile.log" % args.savedir, args)
     logger.info(model)
     model.cuda()
-
+    # if args.multiGPU:
+    #     model = nn.DataParallel(model)
     torch.save(args, os.path.join(args.savedir, "args.pt"))
 
     start_epoch, global_step, n_no_improve, best_metric = 0, 0, 0, -np.inf
@@ -209,12 +214,15 @@ def train(args):
         train_losses = []
         model.train()
         optimizer.zero_grad()
+        logger.info(f"total data:{len(train_loader)}")
+        for batch in tqdm(train_loader, total=(len(train_loader))):
+            train_batch_start = time.time()
 
-        for batch in tqdm(train_loader, total=len(train_loader)):
             loss, _, _ = model_forward(i_epoch, model, args, criterion, batch)
+            if args.multiGPU:
+                loss = loss.mean()
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
-
             train_losses.append(loss.item())
             loss.backward()
             global_step += 1
@@ -222,14 +230,19 @@ def train(args):
                 optimizer.step()
                 optimizer.zero_grad()
 
+            train_batch_end = time.time()
+
+
+        logger.info(f"EPOCH: {i_epoch}, Train Loss: {np.mean(train_losses):.4f}, time: {train_batch_end - train_batch_start} secs")
+        eval_start = time.time()
         model.eval()
         metrics = model_eval(i_epoch, val_loader, model, args, criterion)
-        logger.info("Train Loss: {:.4f}".format(np.mean(train_losses)))
+        eval_end = time.time()
         log_metrics("Val", metrics, args, logger)
-
         tuning_metric = (
             metrics["micro_f1"] if args.task_type == "multilabel" else metrics["acc"]
         )
+        logger.info(f"Val acc {tuning_metrics}, time: {eval_end - eval_start} secs")
         scheduler.step(tuning_metric)
         is_improvement = tuning_metric > best_metric
         if is_improvement:

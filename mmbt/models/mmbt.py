@@ -75,6 +75,12 @@ class MultimodalBertEncoder(nn.Module):
         self.pooler = bert.pooler
         self.clf = nn.Linear(args.hidden_sz, args.n_classes)
 
+        # GPU Options
+        if args.multiGPU:
+            self.img_embeddings = nn.DataParallel(self.img_embeddings)
+            self.encoder = nn.DataParallel(self.encoder)
+            self.img_encoder = nn.DataParallel(self.img_encoder)
+
     def forward(self, input_txt, attention_mask, segment, input_img):
         bsz = input_txt.size(0)
         attention_mask = torch.cat(
