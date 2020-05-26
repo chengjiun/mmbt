@@ -22,17 +22,30 @@ from mmbt.data.vocab import Vocab
 import pandas as pd
 
 def get_transforms(args):
-    return transforms.Compose(
-        [
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.46777044, 0.44531429, 0.40661017],
-                std=[0.12221994, 0.12145835, 0.14380469],
-            ),
-        ]
-    )
+    if args.no_crop:
+        tt = transforms.Compose(
+            [
+                transforms.Resize([224,224]),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.46777044, 0.44531429, 0.40661017],
+                    std=[0.12221994, 0.12145835, 0.14380469],
+                ),
+            ]
+        )
+    else:
+        tt = transforms.Compose(
+            [
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.46777044, 0.44531429, 0.40661017],
+                    std=[0.12221994, 0.12145835, 0.14380469],
+                ),
+            ]
+        )
+    return tt
 
 
 def get_labels_and_frequencies(path):
@@ -200,6 +213,8 @@ def get_data_loaders(args):
         )
 
         test = {"test": test_loader, "test_hard": test_hard_loader}
+    elif args.task == 'msnews':
+        test = {"test": test_loader}
 
     else:
         test_gt = table_loader(

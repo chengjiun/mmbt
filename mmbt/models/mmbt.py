@@ -59,7 +59,7 @@ class MultimodalBertEncoder(nn.Module):
         bert = BertModel.from_pretrained(args.bert_model)
         self.txt_embeddings = bert.embeddings
 
-        if args.task == "vsnli":
+        if args.task in ["vsnli", 'msnews']:
             ternary_embeds = nn.Embedding(3, args.hidden_sz)
             ternary_embeds.weight.data[:2].copy_(
                 bert.embeddings.token_type_embeddings.weight

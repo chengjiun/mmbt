@@ -43,7 +43,7 @@ class JsonlDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        if self.args.task == "vsnli":
+        if self.args.task in ["vsnli", "msnews"]:
             sent1 = self.tokenizer(self.data[index]["sentence1"])
             sent2 = self.tokenizer(self.data[index]["sentence2"])
             truncate_seq_pair(sent1, sent2, self.args.max_seq_len - 3)
@@ -109,7 +109,7 @@ class TsvVSNLIDataset(JsonlDataset):
             print(f" drop number of lines because of missing sentence2: {df['sentence2'].isnull().sum()}")
         df = df.loc[df['sentence2'].isnull() != True]
         df = df.rename({'gold_label':'label', 'image':'img'}, axis=1)
-        df['img'] = 'flickr30/flickr30k-images/' + df['img']
+        df['img'] = args.img_path + '/' + df['img']
         self.data = df.to_dict('records')
         self.data_dir = str(os.path.dirname(data_path))
         self.tokenizer = tokenizer

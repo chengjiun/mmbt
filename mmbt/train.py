@@ -9,7 +9,7 @@
 
 
 import argparse
-from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
 from tqdm import tqdm
 
 import torch
@@ -22,12 +22,19 @@ from mmbt.models import get_model
 from mmbt.utils.logger import create_logger
 from mmbt.utils.utils import *
 import time
+try:
+    from apex import amp
+    APEX_AVAILABLE = True
+except ModuleNotFoundError:
+    APEX_AVAILABLE = False
+
 
 def get_args(parser):
     parser.add_argument("--batch_sz", type=int, default=128)
     parser.add_argument("--bert_model", type=str, default="bert-base-uncased", choices=["bert-base-uncased", "bert-large-uncased"])
     # only resnet152 works (fc layers dimension issue)
     parser.add_argument("--img_model", type=str, default='resnet152', choices=['resnet152', 'resnet50', 'resnet18'])
+    parser.add_argument("--img_path", type=str, default="flickr30/flickr30k-images/")    
     parser.add_argument("--data_path", type=str, default="/path/to/data_dir/")
     parser.add_argument("--use_tsv", type=int, default=0)
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
@@ -54,11 +61,14 @@ def get_args(parser):
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--savedir", type=str, default="/path/to/save_dir/")
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--task", type=str, default="mmimdb", choices=["mmimdb", "vsnli", "food101"])
+    parser.add_argument("--task", type=str, default="mmimdb", choices=["mmimdb", "vsnli", "food101", "msnews"])
     parser.add_argument("--task_type", type=str, default="multilabel", choices=["multilabel", "classification"])
     parser.add_argument("--warmup", type=float, default=0.1)
     parser.add_argument("--weight_classes", type=int, default=1)
     parser.add_argument("--multiGPU", type=int, default=0)
+    parser.add_argument("--fp16", type=int, default=0)
+    parser.add_argument("--no_crop", type=int, default=0)
+    parser.add_argument("--no_cuda", type=int, default=0)
 
 
 def get_criterion(args):
@@ -133,6 +143,8 @@ def model_eval(i_epoch, data, model, args, criterion, store_preds=False):
         tgts = [l for sl in tgts for l in sl]
         preds = [l for sl in preds for l in sl]
         metrics["acc"] = accuracy_score(tgts, preds)
+        metrics["prec"] = precision_score(tgts, preds)
+        metrics["recall"] = recall_score(tgts, preds)
 
     if store_preds:
         store_preds_to_disk(tgts, preds, args)
@@ -142,7 +154,6 @@ def model_eval(i_epoch, data, model, args, criterion, store_preds=False):
 
 def model_forward(i_epoch, model, args, criterion, batch):
     txt, segment, mask, img, tgt = batch
-
     freeze_img = i_epoch < args.freeze_img
     freeze_txt = i_epoch < args.freeze_txt
 
@@ -168,7 +179,6 @@ def model_forward(i_epoch, model, args, criterion, batch):
             param.requires_grad = not freeze_img
         for param in model.enc.encoder.parameters():
             param.requires_grad = not freeze_txt
-
         txt, img = txt.cuda(), img.cuda()
         mask, segment = mask.cuda(), segment.cuda()
         out = model(txt, mask, segment, img)
@@ -210,6 +220,11 @@ def train(args):
         scheduler.load_state_dict(checkpoint["scheduler"])
 
     logger.info("Training..")
+    if APEX_AVAILABLE and args.fp16:
+        model, optimizer = amp.initialize(
+            model, optimizer, opt_level="O2", 
+            keep_batchnorm_fp32=True, loss_scale="dynamic"
+        )
     for i_epoch in range(start_epoch, args.max_epochs):
         train_losses = []
         model.train()
@@ -217,15 +232,17 @@ def train(args):
         logger.info(f"total data:{len(train_loader)}")
         train_batch_start = time.time()
         for batch in tqdm(train_loader, total=(len(train_loader))):
-
-
             loss, _, _ = model_forward(i_epoch, model, args, criterion, batch)
             if args.multiGPU:
                 loss = loss.mean()
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
             train_losses.append(loss.item())
-            loss.backward()
+            if APEX_AVAILABLE and args.fp16:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
             global_step += 1
             if global_step % args.gradient_accumulation_steps == 0:
                 optimizer.step()
@@ -237,10 +254,15 @@ def train(args):
         metrics = model_eval(i_epoch, val_loader, model, args, criterion)
         eval_end = time.time()
         log_metrics("Val", metrics, args, logger)
-        tuning_metric = (
-            metrics["micro_f1"] if args.task_type == "multilabel" else metrics["acc"]
-        )
-        logger.info(f"Val acc {tuning_metric}, time: {(eval_end - eval_start)/60:.2f}mins")
+        if args.task_type='multilabel':
+            tuning_metric = (
+                metrics["micro_f1"]
+            )
+            logger.info(f"Val acc {tuning_metric}, time: {(eval_end - eval_start)/60:.2f}mins")
+        else:
+            tuning_metrics = metrics['acc']
+            logger.info(f'Val acc {metrics["acc"]}, precision {metrics["prec"]}, recall {metrics["recall"]}, time: {(eval_end - eval_start)/60:.2f}mins ')
+
         scheduler.step(tuning_metric)
         is_improvement = tuning_metric > best_metric
         if is_improvement:
@@ -261,7 +283,8 @@ def train(args):
             is_improvement,
             args.savedir,
         )
-        torch.cuda.empty_cache()
+        if not args.no_cuda:
+            torch.cuda.empty_cache()
         if n_no_improve >= args.patience:
             logger.info("No improvement. Breaking out of loop.")
             break
