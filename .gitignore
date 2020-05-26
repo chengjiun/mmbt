@@ -2,7 +2,9 @@
 fb
 input/
 save/
-*/*/__pycache__/
-*/__pycache__/
+*/__pycache__/*
+*/*/__pycache__/*
+mmbt/__pycache__/*.pyc
+**/*.pyc
 notebooks/
 *.log
