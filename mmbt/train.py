@@ -22,8 +22,10 @@ from mmbt.models import get_model
 from mmbt.utils.logger import create_logger
 from mmbt.utils.utils import *
 import time
+
 try:
     from apex import amp
+
     APEX_AVAILABLE = True
 except ModuleNotFoundError:
     APEX_AVAILABLE = False
@@ -31,10 +33,20 @@ except ModuleNotFoundError:
 
 def get_args(parser):
     parser.add_argument("--batch_sz", type=int, default=128)
-    parser.add_argument("--bert_model", type=str, default="bert-base-uncased", choices=["bert-base-uncased", "bert-large-uncased"])
+    parser.add_argument(
+        "--bert_model",
+        type=str,
+        default="bert-base-uncased",
+        choices=["bert-base-uncased", "bert-large-uncased"],
+    )
     # only resnet152 works (fc layers dimension issue)
-    parser.add_argument("--img_model", type=str, default='resnet152', choices=['resnet152', 'resnet50', 'resnet18'])
-    parser.add_argument("--img_path", type=str, default="flickr30/flickr30k-images/")    
+    parser.add_argument(
+        "--img_model",
+        type=str,
+        default="resnet152",
+        choices=["resnet152", "resnet50", "resnet18"],
+    )
+    parser.add_argument("--img_path", type=str, default="flickr30/flickr30k-images/")
     parser.add_argument("--data_path", type=str, default="/path/to/data_dir/")
     parser.add_argument("--use_tsv", type=int, default=0)
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
@@ -42,11 +54,15 @@ def get_args(parser):
     parser.add_argument("--embed_sz", type=int, default=300)
     parser.add_argument("--freeze_img", type=int, default=0)
     parser.add_argument("--freeze_txt", type=int, default=0)
-    parser.add_argument("--glove_path", type=str, default="/path/to/glove_embeds/glove.840B.300d.txt")
+    parser.add_argument(
+        "--glove_path", type=str, default="/path/to/glove_embeds/glove.840B.300d.txt"
+    )
     parser.add_argument("--gradient_accumulation_steps", type=int, default=24)
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--hidden_sz", type=int, default=768)
-    parser.add_argument("--img_embed_pool_type", type=str, default="avg", choices=["max", "avg"])
+    parser.add_argument(
+        "--img_embed_pool_type", type=str, default="avg", choices=["max", "avg"]
+    )
     parser.add_argument("--img_hidden_sz", type=int, default=2048)
     parser.add_argument("--include_bn", type=int, default=True)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -54,15 +70,30 @@ def get_args(parser):
     parser.add_argument("--lr_patience", type=int, default=2)
     parser.add_argument("--max_epochs", type=int, default=100)
     parser.add_argument("--max_seq_len", type=int, default=512)
-    parser.add_argument("--model", type=str, default="bow", choices=["bow", "img", "bert", "concatbow", "concatbert", "mmbt"])
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="bow",
+        choices=["bow", "img", "bert", "concatbow", "concatbert", "mmbt"],
+    )
     parser.add_argument("--n_workers", type=int, default=12)
     parser.add_argument("--name", type=str, default="nameless")
     parser.add_argument("--num_image_embeds", type=int, default=1)
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--savedir", type=str, default="/path/to/save_dir/")
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--task", type=str, default="mmimdb", choices=["mmimdb", "vsnli", "food101", "msnews"])
-    parser.add_argument("--task_type", type=str, default="multilabel", choices=["multilabel", "classification"])
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="mmimdb",
+        choices=["mmimdb", "vsnli", "food101", "msnews"],
+    )
+    parser.add_argument(
+        "--task_type",
+        type=str,
+        default="multilabel",
+        choices=["multilabel", "classification"],
+    )
     parser.add_argument("--warmup", type=float, default=0.1)
     parser.add_argument("--weight_classes", type=int, default=1)
     parser.add_argument("--multiGPU", type=int, default=0)
@@ -96,8 +127,18 @@ def get_optimizer(model, args):
         param_optimizer = list(model.named_parameters())
         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
-            {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay": 0.01},
-            {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay": 0.0,},
+            {
+                "params": [
+                    p for n, p in param_optimizer if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.01,
+            },
+            {
+                "params": [
+                    p for n, p in param_optimizer if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
         ]
         optimizer = BertAdam(
             optimizer_grouped_parameters,
@@ -127,7 +168,13 @@ def model_eval(i_epoch, data, model, args, criterion, store_preds=False):
             if args.task_type == "multilabel":
                 pred = torch.sigmoid(out).cpu().detach().numpy() > 0.5
             else:
-                pred = torch.nn.functional.softmax(out, dim=1).argmax(dim=1).cpu().detach().numpy()
+                pred = (
+                    torch.nn.functional.softmax(out, dim=1)
+                    .argmax(dim=1)
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
 
             preds.append(pred)
             tgt = tgt.cpu().detach().numpy()
@@ -222,8 +269,11 @@ def train(args):
     logger.info("Training..")
     if APEX_AVAILABLE and args.fp16:
         model, optimizer = amp.initialize(
-            model, optimizer, opt_level="O2", 
-            keep_batchnorm_fp32=True, loss_scale="dynamic"
+            model,
+            optimizer,
+            opt_level="O2",
+            keep_batchnorm_fp32=True,
+            loss_scale="dynamic",
         )
     for i_epoch in range(start_epoch, args.max_epochs):
         train_losses = []
@@ -248,20 +298,24 @@ def train(args):
                 optimizer.step()
                 optimizer.zero_grad()
         train_batch_end = time.time()
-        logger.info(f"EPOCH: {i_epoch}, Train Loss: {np.mean(train_losses):.4f}, time: {(train_batch_end - train_batch_start)/60:.1f}mins")
+        logger.info(
+            f"EPOCH: {i_epoch}, Train Loss: {np.mean(train_losses):.4f}, time: {(train_batch_end - train_batch_start)/60:.1f}mins"
+        )
         eval_start = time.time()
         model.eval()
         metrics = model_eval(i_epoch, val_loader, model, args, criterion)
         eval_end = time.time()
         log_metrics("Val", metrics, args, logger)
-        if args.task_type='multilabel':
-            tuning_metric = (
-                metrics["micro_f1"]
+        if args.task_type == "multilabel":
+            tuning_metric = metrics["micro_f1"]
+            logger.info(
+                f"Val acc {tuning_metric}, time: {(eval_end - eval_start)/60:.2f}mins"
             )
-            logger.info(f"Val acc {tuning_metric}, time: {(eval_end - eval_start)/60:.2f}mins")
         else:
-            tuning_metrics = metrics['acc']
-            logger.info(f'Val acc {metrics["acc"]}, precision {metrics["prec"]}, recall {metrics["recall"]}, time: {(eval_end - eval_start)/60:.2f}mins ')
+            tuning_metric = metrics["acc"]
+            logger.info(
+                f'Val acc {metrics["acc"]:.3f}, precision {metrics["prec"]:.3f}, recall {metrics["recall"]:.3f}, time: {(eval_end - eval_start)/60:.2f}mins '
+            )
 
         scheduler.step(tuning_metric)
         is_improvement = tuning_metric > best_metric
